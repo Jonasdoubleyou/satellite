@@ -1,0 +1,2 @@
+#!/bin/bash
+clang++ -x c++ -Wall -std=c++23 main.cpp -o sat

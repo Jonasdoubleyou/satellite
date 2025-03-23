@@ -1,0 +1,8 @@
+#!/bin/bash
+./build
+
+for testfile in tests/*.cnf; do
+    [ -e "$testfile" ] || continue
+    echo $testfile
+    ./sat $testfile > ${testfile/cnf/out}
+done
