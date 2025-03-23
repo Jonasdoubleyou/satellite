@@ -150,11 +150,11 @@ public:
         return { .assigned = assignment.assigned, .value = isNegated(literal) ? !assignment.value : assignment.value };
     }
 
-    void assignVariable(VariableID id, bool value) {
+    void assignVariable(VariableID id, bool value, bool overwrite = false) {
         // TODO: By parsing the header, we can avoid growing here
         if (id > getMaxVariable()) setMaxVariable(id);
 
-        DEV_ASSURE(!getVariableAssignment(id).assigned, "Duplicate Assignment to " << id);
+        DEV_ASSURE(overwrite || !getVariableAssignment(id).assigned, "Duplicate Assignment to " << id);
         m_assignments.at((id - 1) * 2) = true;
         m_assignments.at((id - 1) * 2 + 1) = value;
         m_assignmentCount += 1;
@@ -163,8 +163,8 @@ public:
     size_t getAssignmentCount() { return m_assignmentCount; }
 
     // Assigns the literal, i.e. assumes that a = True or NOT(a) = True
-    void assignLiteral(LiteralID literal, bool value) {
-        assignVariable(toVariable(literal), isNegated(literal) ? !value : value);
+    void assignLiteral(LiteralID literal, bool value, bool overwrite = false) {
+        assignVariable(toVariable(literal), isNegated(literal) ? !value : value, overwrite);
     }
 
     void print(std::ostream& out) const {
@@ -457,6 +457,12 @@ public:
         visitLiterals([&](LiteralID literal) { literals.emplace(literal); });
         return literals;
     }
+
+    std::set<VariableID> getVariables() const {
+        std::set<VariableID> variables;
+        visitLiterals([&](LiteralID literal) { variables.emplace(toVariable(literal)); });
+        return variables;
+    }
     
 private:
     NODE_TYPE m_type;
@@ -633,26 +639,26 @@ public:
 class BruteForce: public Phase {
 public:
     Assignment run() {
-        auto literals = m_ctx.root->getLiterals();
+        auto variables = m_ctx.root->getVariables();
 
         while (true) {
             bool done = true;
-            for (LiteralID literal: literals) {
-                auto assignment = m_ctx.assignments.getLiteralAssignment(literal);
+            for (VariableID variable: variables) {
+                auto assignment = m_ctx.assignments.getVariableAssignment(variable);
                 if (!assignment.assigned || !assignment.value) {
-                    m_ctx.assignments.assignLiteral(literal, true);
+                    m_ctx.assignments.assignVariable(variable, true, true);
                     done = false;
                     break;
                 }
 
-                m_ctx.assignments.assignLiteral(literal, false);
+                m_ctx.assignments.assignVariable(variable, false, true);
             }
 
             if (done) return { .assigned = true, .value = false };
 
             DEV_ONLY(
                 std::cerr << "\n";
-                for (LiteralID literal: literals) { std::cerr << literal << " = " <<  m_ctx.assignments.getLiteralAssignment(literal) << ", "; }
+                for (VariableID variable: variables) { std::cerr << variable << " = " <<  m_ctx.assignments.getVariableAssignment(variable) << ", "; }
             )
         
             auto assignment = m_ctx.root->evaluate(m_ctx.assignments);

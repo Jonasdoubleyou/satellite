@@ -1,8 +1,10 @@
 #!/bin/bash
+echo "Rebuild"
 ./build
 
+echo "Run Tests"
 for testfile in tests/*.cnf; do
     [ -e "$testfile" ] || continue
-    echo $testfile
-    ./sat $testfile > ${testfile/cnf/out}
+    echo "---- $testfile ----"
+    time ./sat $testfile > ${testfile/cnf/out} 2> /dev/null
 done
