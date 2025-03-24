@@ -14,7 +14,7 @@
 
 #define UNREACHABLE ASSURE(false, "Unreachable")
 
-#if 1
+#if 0
     #define DEV_ASSURE(condition, msg) ASSURE(condition, msg)
     #define DEV_ONLY(statement) statement
     #define DEV_PRINT(msg) std::cerr << msg << "\n";
@@ -25,6 +25,7 @@
 #endif
 
 auto start = std::chrono::high_resolution_clock::now();
+void restartTime() { start = std::chrono::high_resolution_clock::now(); }
 
 std::string duration() {
     auto elapsed = std::chrono::high_resolution_clock::now() - start;
@@ -213,6 +214,12 @@ std::ostream& operator<<(std::ostream& out, NODE_TYPE type) {
     return out;
 }
 
+template<typename T>
+bool isNone(const T& it) { return it.isNoOp(); }
+
+template<>
+bool isNone<LiteralID>(const LiteralID& it) { return it == NO_LITERAL; }
+
 // A Node in the predicate tree - It either has other Nodes or Literals as children
 // Both children and literals are located in consecutive memory
 class Node {
@@ -369,41 +376,39 @@ public:
         Assignment assignment = defaultAssignment();
 
         if (hasChildren()) {
-            for (auto& child: children()) {
-                if (child.isNoOp()) continue;
-
+            filter<Node>([&](Node& child) -> FilterResult {
                 auto childAssignment = child.apply(literalAssignments, assignLiterals);
                 updateAssignment(assignment, childAssignment);
-                if (shortCircuit(assignment)) return assignment;
-
+                if (shortCircuit(assignment)) return { .exit = true };
                 if (childAssignment.assigned) {
-                    if (isOR() && !childAssignment.value) child.remove();
-                    if (isAND() && childAssignment.value) child.remove();
+                    if (isOR() && !childAssignment.value) return { .keep = false };
+                    if (isAND() && childAssignment.value) return { .keep = false };
                 }
-            }
-        }
-
-        if (hasLiterals()) {
+                return { .keep = true };
+            });
+        } else if (hasLiterals()) {
+            size_t literalCountBefore = literals().size();
             size_t removedLiterals = 0;
-            for (auto& literal: literals()) {
-                if (literal == NO_LITERAL) continue;
-
+            bool exit = filter<LiteralID>([&](LiteralID& literal) -> FilterResult {
                 const auto literalAssignment = literalAssignments.getLiteralAssignment(literal);
                 updateAssignment(assignment, literalAssignment);
-                if (shortCircuit(assignment)) return assignment;
+                if (shortCircuit(assignment)) return { .exit = true };
 
                 if (literalAssignment.assigned) {
                     if ((isOR() && !literalAssignment.value) || (isAND() && literalAssignment.value)) {
-                        literal = NO_LITERAL;
                         removedLiterals += 1;
+                        return { .keep = false };
                     }
                 }
-            }
+
+                return { .keep = true };
+            });
+            if (exit) return assignment;
 
             // If only one literal is left, we know it must be true to fulfill
             // NOTE: This only holds true in normal form
             if (assignLiterals) {
-                size_t literalCount = literals().size() - removedLiterals;
+                size_t literalCount = literalCountBefore - removedLiterals;
                 if (literalCount == 1) {
                     for (auto literal: literals()) {
                         if (literal == NO_LITERAL) continue;
@@ -463,7 +468,65 @@ public:
         visitLiterals([&](LiteralID literal) { variables.emplace(toVariable(literal)); });
         return variables;
     }
-    
+
+    void visitNodes(std::function<void(Node& node)> visit) {
+        for (auto& child: children()) {
+            visit(child);
+            child.visitNodes(visit);
+        }
+    }
+
+    struct FilterResult { bool keep; bool exit = false; };
+
+    template<typename T>
+    inline bool filter(std::function<FilterResult(T& node)> keep)
+    {
+        static_assert(std::is_same_v<T, Node> || std::is_same_v<T, LiteralID>);
+        DEV_ASSURE((!std::is_same_v<T, Node> || hasChildren()), "Expected Children");
+        DEV_ASSURE((!std::is_same_v<T, LiteralID>) || hasLiterals(), "Expected Literals");
+
+        auto current = static_cast<T*>(m_child_begin);
+        auto end = static_cast<T*>(m_child_end);
+
+        // Move start pointer forward to remove nodes from the beginning
+        while (current < end) {
+            if (isNone(*current)) {
+                current++;
+                continue;
+            }
+            
+            auto result = keep(*current);
+            if (result.exit) return true;
+
+            if (result.keep) break;
+            current++;
+        }
+        m_child_begin = static_cast<void*>(&*current);
+
+        // Shift elements backward to remove nodes in the middle,
+        // afterwards adjust the end
+        auto target = current;
+        while (current < end) {
+            if (isNone(*current)) {
+                current++;
+                continue;
+            }
+            
+            auto result = keep(*current);
+            if (result.exit) return true;
+
+            if (target != current) {
+                *target = *current;
+            }
+
+            if (result.keep) target++;
+            current++;
+        }
+
+        m_child_end = static_cast<void*>(&*target);
+        return false;
+    }
+
 private:
     NODE_TYPE m_type;
     void* m_child_begin;
@@ -724,6 +787,9 @@ int main(int argc, char* argv[]) {
 
     std::fstream fs;
     fs.open(filename, std::fstream::in);
+
+    // Exclude file opening time from measurements to make them more stable
+    restartTime();
 
     auto solver = Solver();
     solver.run(fs);
