@@ -1,2 +1,7 @@
 #!/bin/bash
 clang++ -x c++ -Wall -std=c++23 main.cpp -o sat
+
+for file in generators/*.cpp; do
+    [ -e "$file" ] || continue
+    clang++ -x c++ -Wall -std=c++23 $file -o ${file/.cpp/}
+done
