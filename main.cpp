@@ -608,13 +608,13 @@ protected:
 
         // Construct node with literals as children
         auto& node = m_ctx.nodeMemory.allocate(Node(NODE_TYPE::LITERAL_OR, literals));
-        node.orderLiterals();
+        // node.orderLiterals();
     }
 
     void finish() {
         ASSURE(m_current.empty(), "Unexpected end of input");
         m_ctx.root = &m_ctx.nodeMemory.allocate(Node(NODE_TYPE::AND, m_ctx.nodeMemory.all()));
-        m_ctx.root->orderChildren();
+        // m_ctx.root->orderChildren();
     }
 
 private:
@@ -665,6 +665,7 @@ private:
                 } while (in.get(cursor) && cursor != ' ' && cursor != '\n');
 
                 addLiteral(toLiteral(digits, negate));
+                if (digits == 0) break;
             } while(in.get(cursor));
         }
     }
@@ -782,17 +783,25 @@ public:
 int main(int argc, char* argv[]) {
     std::cerr << "SAT Solver (Jonas Wilms)\n";
 
-    ASSURE(argc == 2, "Usage: ./sat <file>");
-    char* filename = argv[1];
+    ASSURE(argc <= 2, "Usage: ./sat <file?>");
+    if (argc == 2) {
+        char* filename = argv[1];
 
-    std::fstream fs;
-    fs.open(filename, std::fstream::in);
+        std::fstream fs;
+        fs.open(filename, std::fstream::in);
 
-    // Exclude file opening time from measurements to make them more stable
-    restartTime();
+        // Exclude file opening time from measurements to make them more stable
+        restartTime();
 
-    auto solver = Solver();
-    solver.run(fs);
+        auto solver = Solver();
+        solver.run(fs);
+    } else {
+        // Exclude file opening time from measurements to make them more stable
+        restartTime();
+
+        auto solver = Solver();
+        solver.run(std::cin); 
+    }
 
     return 0;
 }
