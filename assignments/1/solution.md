@@ -87,6 +87,20 @@ T(n) = |{ (a, b, c) | c ∈ (1, n), a^2 + b^2 = c^2 }|
 Dann ist die Anzahl der Variablen des SAT Problems `n`,
  und die Anzahl der Klauseln `T(n) * 2`, da pro möglichem Tripel zwei Klauseln benötigt werden (z.B. `3 v 4 v 5` und `-3 v -4 v -5`).
 
+Um alle Tripel zu finden iterieren wir über `b` und `c`, und suchen ein `a`:
+
+```cpp
+for (int c = 1; c < n; c++) {
+    for (int b = 1; b < c; b++) {
+        // ...
+    }
+}
+```
+
+Wir wissen das `b < c`, denn falls `b = c` folgt `a = 0`. Die Schleifen iterieren insgesamt
+ `n * (n - 1) / 2` mal (Dreieckszahl), jeder Schleifendurchlauf findet maximal ein Tripel.
+Also gilt `T(n) < n * (n - 1) / 2`. Eine obere Schranke für die Anzahl an Klauseln ist also `n * (n - 1)`.
+
 ----
 
 > Finden Sie mit Hilfe eines SAT Solvers eine Lösung (d.h. eine Färbung) für die ersten 1000 Zahlen (1, 2, ..., 1000) des Pythagoräischen-Triple-Problems.
