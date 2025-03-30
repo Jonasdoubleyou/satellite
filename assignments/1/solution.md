@@ -1,3 +1,78 @@
+# Blatt1 - Aufgabe 3 - Van-der-Waerden-Zahlen
+
+> Berechnen Sie, wie viele Variablen und Klausen die SAT-Codierung aus der Vorlesung benötigt, um die Eigenschaft W(2, k) > n zu prüfen.
+
+Gibt es eine binäre Zahl (r = 2), deren Länge <= n und die keine Wiederholungen hat, so ist `W(2, k) > n` falsch, andernfalls wahr.
+Wir stellen ein SAT Problem auf, das lösbar ist wenn eine solche Zahl existiert und damit  `W(2, k) > n` falsch.
+
+Finden wir eine Zahl mit Wiederholungen der Länge n, z.B. für n = 4 die Zahl `1110` wo sich 1 mit Abstand 1 drei mal wiederholt, 
+ so gibt es auch eine Zahl der Länge n + 1, wo sich 1 mit Abstand 1 drei mal wiederholt - wir hängen einfach eine Ziffer an `1110 + 0`.
+Finden wir also keine Zahl mit der Länge `n` die keine Wiederholungen enthält, so gibt es auch keine kürzere Zahl.
+Es genügt also zu prüfen, ob es keine Zahl mit _exakt der Länge n_ gibt, um `W(2, k) > n` zu prüfen. 
+
+Sei `x(i) = 1` falls an der i-ten Stelle eine 1 in der Zeichenkette steht, sonst 0. Für eine n-stellige Zeichenkette werden also n Variablen benötigt, um die Zeichenkette darzustellen.
+
+Sei `d >= 1` der Abstand zwischen den Wiederholungen. Dann fordern wir `not(x(i) = 1 and x(i + d) = 1 ...)` (1 wiederholt sich mit Abstand d, k mal) und `not(x(i) = 0 and x(i + d) = 0 ...)`.
+
+Für `d = 1, n = 9, k = 3` brauchen wir folgende Klauseln:
+
+```
+123456789
+^^^         -> 123, -1-2-3   +
+ ^^^        -> 234, -2-3-4   |-> n - Länge des Musters + 1 = 9 - 3 + 1 = 7
+  ^^^       -> 345, -3-4-5   |
+   ^^^      -> 456, -4-5-6   |
+    ^^^     -> 567, -5-6-7   |
+     ^^^    -> 678, -6-7-8   |
+      ^^^   -> 789, -7-8-9   +
+      +++ -> Länge des Musters = d * (k - 1) + 1 = 1 * 2 + 1 = 3
+```
+
+Für `d = 2, n = 9, k = 3` brauchen wir folgende Klauseln:
+
+```
+123456789
+^ ^ ^       -> 135, -1-3-5   +
+ ^ ^ ^      -> 246, -2-4-6   |-> n - Länge des Musters + 1 = 9 - 5 + 1 = 5
+  ^ ^ ^     -> 357, -3-5-7   |
+   ^ ^ ^    -> 456, -4-6-8   |
+    ^ ^ ^   -> 579, -5-7-9   +
+    +++++ -> Länge des Musters = d * (k - 1) + 1 = 2 * 2 + 1 = 5
+```
+
+Das Muster um auf `k` Wiederholungen mit Abstand `d` zu prüfen ist damit `d * (k - 1) + 1` lang.
+In einer Zeichenkette mit Länge `n` kann dieses Muster an der ersten, zweiten, ... Stelle auftauchen.
+Wir verschieben das Muster also jeweils um eine Stelle, ergo taucht das Muster `n - (d * (k - 1) + 1) + 1` mal auf. 
+
+Wir benötigen also `2 * (n - d * (k - 1))` Klauseln, um auf eine Wiederholung mit Abstand `d` zu prüfen. 
+Wir wollen allerdings auf alle möglichen Abstände prüfen - welche Abstände kann es geben?
+
+Das Muster muss kürzer oder gleich lang wie die Zeichenkette sein, also `d * (k - 1) + 1 <= n`:
+
+```
+d * (k - 1) + 1 <= n | -1
+d * (k - 1) <= n - 1 | / (k - 1) - wir fordern k >= 2 (eine einmalige Wiederholung ist trivial)
+d <= (n - 1) / (k - 1)
+```
+
+Es gibt also folgende Anzahl an Klauseln:
+
+```
+sum(d = 1, d <= (n - 1) / (k - 1), 2 * (n - d * (k - 1)))
+```
+
+Z.B. für `n = 9, k = 3` (das Beispiel aus den Slides):
+
+```
+sum(d = 1, d <= (9 - 1) / (3 - 1), 2 * (9 - d * (3 - 1)))
+= sum(d = 1, d <= 4, 2 * (9 - d * 2))
+= 2 * (9 - 1 * 2) + 2 * (9 - 2 * 2) + 2 * (9 - 3 * 2) + 2 * (9 - 4 * 2)
+= 2 * 7 + 2 * 5 + 2 * 3 + 2 * 1
+= 14 + 10 + 6 + 2
+= 32
+```
+
+
 # Blatt1 - Aufgabe 4 - Pythagoräische Tripel
 
 > Schätzen Sie die Anzahl der Variablen und Klauseln ab für die SAT-Codierung aus der Vorlesung
