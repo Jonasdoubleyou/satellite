@@ -1,0 +1,4 @@
+git clone https://github.com/arminbiere/kissat.git dependencies/kissat
+cd dependencies/kissat
+./configure
+make
