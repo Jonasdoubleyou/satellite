@@ -23,6 +23,12 @@ public:
     }
 };
 
+enum Result {
+    SAT = 10,
+    UNSAT = 20,
+    TERMINATE = 0
+};
+
 class DIMACSProblem {
 public:
     void add_header(uint32_t variable_count, uint32_t clause_count) {
@@ -32,14 +38,19 @@ public:
     void add_one_literal(int lit) { std::cout << lit << " "; }
     void end_clause() { std::cout << "0\n"; }
 
-    void solve() { exit(0); }
-};
+    Result solve() {
+        exit(0); 
+        return Result::TERMINATE;
+    }
 
+    void clear() {
+        ASSURE(false, "not implemented");
+    }
 
-enum Result {
-    SAT = 10,
-    UNSAT = 20,
-    TERMINATE = 0
+    bool get_assignment(int lit) {
+        ASSURE(false, "not implemented");
+        return false;
+    }
 };
 
 class KISSATProblem {
@@ -55,12 +66,12 @@ public:
  
     void add_one_literal(int lit) {
         DEV_ASSURE(lit != 0, "");
-        DEV_PRINT("Add Literal " << lit);
+        DEV_ONLY(std::cout << lit << " ";);
         kissat_add(instance, lit);
     }
 
     void end_clause() {
-        DEV_PRINT("End Clause");
+        DEV_ONLY(std::cout << "0\n";);
         kissat_add(instance, 0);
     }
 
