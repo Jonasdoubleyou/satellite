@@ -1,37 +1,4 @@
-#include <iostream>
-#include <vector>
-#include <span>
-#include <algorithm>
-#include <fstream>
-#include <functional>
-#include <set>
-
-#define ASSURE(condition, msg) \
-  if (!(condition)) {              \
-    std::cerr << msg << "\n  Line: " << __LINE__ << "\n"; \
-    exit(1);                       \
-  }
-
-#define UNREACHABLE ASSURE(false, "Unreachable")
-
-#if 0
-    #define DEV_ASSURE(condition, msg) ASSURE(condition, msg)
-    #define DEV_ONLY(statement) statement
-    #define DEV_PRINT(msg) std::cerr << msg << "\n";
-#else
-    #define DEV_ASSURE(condition, msg)
-    #define DEV_ONLY(statement)
-    #define DEV_PRINT(msg)
-#endif
-
-auto start = std::chrono::high_resolution_clock::now();
-void restartTime() { start = std::chrono::high_resolution_clock::now(); }
-
-std::string duration() {
-    auto elapsed = std::chrono::high_resolution_clock::now() - start;
-
-    return std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count()) + "μs";
-}
+#include "common/utils.h"
 
 #define SOLUTION_FOUND(assignment) std::cerr << "\n\nSolution Found after " << duration() << ":\n"; assignment.print(std::cout); exit(0);
 #define NO_SOLUTION(details) std::cerr << "\n\nNo Solution possible after " << duration() << ": " << details << "\n"; std::cout << "UNSAT\n"; exit(1);
