@@ -1,1 +1,8 @@
 /dependencies/kissat/
+.DS_Store
+kissat
+sat
+.vscode/settings.json
+generators/graph_coloring
+generators/pythagorean_triples
+generators/sudoku
