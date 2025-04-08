@@ -1,5 +1,6 @@
 #pragma once
 
+#include "./config.h"
 #include "./utils.h"
 #include "./kissat.h"
 
@@ -29,6 +30,7 @@ enum Result {
     TERMINATE = 0
 };
 
+#ifdef PRODUCE_DIMARCS
 class DIMACSProblem {
 public:
     void add_header(uint32_t variable_count, uint32_t clause_count) {
@@ -53,6 +55,10 @@ public:
     }
 };
 
+auto problem = ProblemBase<DIMACSProblem>();
+#endif
+
+#ifdef SOLVE_WITH_KISSAT
 class KISSATProblem {
 public:
     KISSATProblem() { 
@@ -95,4 +101,4 @@ private:
 };
 
 auto problem = ProblemBase<KISSATProblem>();
-
+#endif

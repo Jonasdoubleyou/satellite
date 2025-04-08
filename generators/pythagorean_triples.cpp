@@ -1,4 +1,4 @@
-#include "./generator.h"
+#include "../common/generate.h"
 
 // --- SQRT of an integer (https://stackoverflow.com/a/63457507/5260024) ---
 unsigned char bit_width(unsigned long long x) {
@@ -30,21 +30,32 @@ int main(int argc, char* argv[]) {
 
     int n = std::stoi(argv[1]);
 
-    header(n, n * 2);
+    problem.add_header(n, n * 2);
 
     for (int c = 1; c < n; c++) {
         for (int b = 1; b < c; b++) {
             int a_square = (c * c) - (b * b);
             int a = fast_sqrt(a_square);
             if (a * a == a_square && a <= b) {
-                comment(a << "^2 + " << b << "^2 = " << c << "^2");
-                clause(
-                    "-" << a << " -" << b << " -" << c
-                );
-                clause(
-                    a << " " << b << " " << c
-                );
+                DEV_PRINT(a << "^2 + " << b << "^2 = " << c << "^2");
+                problem.add_clause(negate(a),  negate(b), negate(c));
+                problem.add_clause(a, b, c);
             }
+        }
+    }
+
+    auto solution = problem.solve();
+    if (solution != Result::SAT) {
+        PRINT("Unsolvable");
+        return 0;
+    }
+
+    PRINT("Found solution in " << duration());
+    for (int c = 1; c < n; c++) {
+        if (problem.get_assignment(c)) {
+            PRINT(c << " is black");
+        } else {
+            PRINT(c << " is white");
         }
     }
 }

@@ -9,6 +9,8 @@
 #include <set>
 #include <unordered_set>
 
+#include "./config.h"
+
 #define ASSURE(condition, msg) \
   if (!(condition)) {              \
     std::cerr << msg << "\n  Line: " << __LINE__ << "\n"; \
@@ -19,7 +21,7 @@
 
 #define PRINT(msg) std::cerr << msg << "\n";
 
-#if 0
+#ifdef DEBUG
     #define DEV_ASSURE(condition, msg) ASSURE(condition, msg)
     #define DEV_ONLY(statement) statement
     #define DEV_PRINT(msg) PRINT(msg);

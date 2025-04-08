@@ -1,10 +1,13 @@
 #pragma once
 
+// KISSAT interface, adapted for C++
+
 typedef struct kissat kissat;
+
+extern "C" {
 
 // Default (partial) IPASIR interface.
 
-extern "C" {
 const char *kissat_signature (void);
 kissat *kissat_init (void);
 void kissat_add (kissat *solver, int lit);
