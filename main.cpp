@@ -129,16 +129,12 @@ public:
         DEV_ASSURE(overwrite || !getVariableAssignment(id).assigned, "Duplicate Assignment to " << id);
         m_assignments.at((id - 1) * 2) = true;
         m_assignments.at((id - 1) * 2 + 1) = value;
-        m_assignmentCount += 1;
     }
 
     void unassignVariable(VariableID id) {
         DEV_ASSURE(getVariableAssignment(id).assigned, "Unassigning not assigned " << id);
         m_assignments.at((id - 1) * 2) = false;
-        m_assignmentCount -= 1;
     }
-
-    size_t getAssignmentCount() { return m_assignmentCount; }
 
     // Assigns the literal, i.e. assumes that a = True or NOT(a) = True
     void assignLiteral(LiteralID literal, bool value, bool overwrite = false) {
@@ -154,12 +150,16 @@ public:
             }
         }
 
-        out << "\n\n";
+        if (asAssignment) out << "\n\n";
     }
 private:
-    size_t m_assignmentCount = 0;
     std::vector<bool> m_assignments;
 };
+
+std::ostream& operator<<(std::ostream& out, const LiteralAssignment& assignment) {
+    assignment.print(out);
+    return out;
+}
 
 // --------------------- Node -----------------------------------------
 
@@ -223,37 +223,14 @@ public:
         DEV_ASSURE(hasLiterals(), "Invalid Node Type");
         m_child_begin = &*literals.begin();
         m_child_end = &*literals.end();
-
-        DEV_ONLY(m_dev_sorted = false;)
     }
 
     void setChildren(const std::span<Node>& children) {
         DEV_ASSURE(hasChildren(), "Invalid Node Type");
         m_child_begin = &*children.begin();
         m_child_end = &*children.end();
-
-        DEV_ONLY(m_dev_sorted = false;)
     }
 
-    // Orders literals in ascending order. Afterwards one can do binary search in them
-    void orderLiterals() {
-        DEV_ASSURE(hasLiterals(), "Invalid Node Type");
-        std::sort(literals().begin(), literals().end(), [](LiteralID a, LiteralID b) {
-            return b > a;
-        });
-
-        DEV_ONLY(m_dev_sorted = true;)
-    }
-
-    // Orders children by their child count, so that simpler predicates come first
-    void orderChildren() {
-        DEV_ASSURE(hasChildren(), "Invalid Node Type");
-        std::sort(children().begin(), children().end(), [](const Node& a, const Node& b) {
-            return b.childCount() > a.childCount();
-        });
-
-        DEV_ONLY(m_dev_sorted = true;)
-    }
 
     bool hasLiterals() const {
         return m_type < NODE_TYPE::LITERAL_END; 
@@ -289,27 +266,24 @@ public:
         return std::span<Node>(static_cast<Node*>(m_child_begin), static_cast<Node*>(m_child_end));
     }
 
-    size_t childCount() const {
-        return hasChildren() ? children().size() : literals().size();
-    }
-
     void print(std::ostream& out, size_t depth = 0) const {
         out << std::setfill(' ') << std::setw(depth * 2) << "";
-        out << m_type << "\n";
-        for (const auto& child: children()) {
-            if (child.isNoOp()) continue;
-            child.print(out, depth + 1);
+        out << m_type;
+        if (hasChildren()) {
+            out << "\n";
+            for (const auto& child: children()) {
+                if (child.isNoOp()) continue;
+                child.print(out, depth + 1);
+                out << "\n";
+            }
         }
 
         if (hasLiterals()) {
-            out << std::setfill(' ') << std::setw((depth + 1) * 2) << "";
-            out << "LIT:";
             for (const auto& literal: literals()) {
                 if (literal == NO_LITERAL) continue;
                 out << " " << literal;
             }
         }
-        out << "\n";
     }
 
     // Assignment if the node has no children
@@ -351,66 +325,9 @@ public:
         } else UNREACHABLE;
     }
 
-    // Applies the assignment to the tree and returns the assignment of the node
-    //
-    // If assignLiterals is true, if a node is reduced to a single literal,
-    //  the literal is assigned to the value to make the predicate evaluate to true.
-    // This only makes sense if the predicate tree is in CNF
-    Assignment apply(LiteralAssignment& literalAssignments, bool assignLiterals) {
-        Assignment assignment = defaultAssignment();
-
-        if (hasChildren()) {
-            filter<Node>([&](Node& child) -> FilterResult {
-                auto childAssignment = child.apply(literalAssignments, assignLiterals);
-                updateAssignment(assignment, childAssignment);
-                if (shortCircuit(assignment)) return { .exit = true };
-                if (childAssignment.assigned) {
-                    if (isOR() && !childAssignment.value) return { .keep = false };
-                    if (isAND() && childAssignment.value) return { .keep = false };
-                }
-                return { .keep = true };
-            });
-        } else if (hasLiterals()) {
-            size_t literalCountBefore = literals().size();
-            size_t removedLiterals = 0;
-            bool exit = filter<LiteralID>([&](LiteralID& literal) -> FilterResult {
-                const auto literalAssignment = literalAssignments.getLiteralAssignment(literal);
-                updateAssignment(assignment, literalAssignment);
-                if (shortCircuit(assignment)) return { .exit = true };
-
-                if (literalAssignment.assigned) {
-                    if ((isOR() && !literalAssignment.value) || (isAND() && literalAssignment.value)) {
-                        removedLiterals += 1;
-                        return { .keep = false };
-                    }
-                }
-
-                return { .keep = true };
-            });
-            if (exit) return assignment;
-
-            // If only one literal is left, we know it must be true to fulfill
-            // NOTE: This only holds true in normal form
-            if (assignLiterals) {
-                size_t literalCount = literalCountBefore - removedLiterals;
-                if (literalCount == 1) {
-                    for (auto literal: literals()) {
-                        if (literal == NO_LITERAL) continue;
-                        DEV_PRINT("  + Derived " << literal);
-                        literalAssignments.assignLiteral(literal, true);
-                        break;
-                    }
-
-                    return { .assigned = true, .value = true };
-                }
-            }
-        }
-
-        return assignment;
-    }
 
     // Evaluates the predicate tree to the assignment
-    Assignment evaluate(const LiteralAssignment& literalAssignments, std::function<bool (LiteralID)> propagateUnit) const {
+    Assignment evaluate(const LiteralAssignment& literalAssignments, std::function<bool (const Node&, LiteralID)> propagateUnit = [](const Node&, LiteralID) { return false; }) const {
         Assignment assignment = defaultAssignment();
 
         uint32_t unassignedCount = 0;
@@ -433,7 +350,7 @@ public:
         } 
 
         if (unassignedCount == 1) {
-            if (propagateUnit(unitLiteral)) return { .assigned = true, .value = true };
+            if (propagateUnit(*this, unitLiteral)) return { .assigned = true, .value = true };
         }
 
         for (const auto& child: children()) {
@@ -458,13 +375,6 @@ public:
         }
     }
 
-    // Returns all literals that appear within the predicate
-    std::set<LiteralID> getLiterals() const {
-        std::set<LiteralID> literals;
-        visitLiterals([&](LiteralID literal) { literals.emplace(literal); });
-        return literals;
-    }
-
     std::set<VariableID> getVariables() const {
         std::set<VariableID> variables;
         visitLiterals([&](LiteralID literal) { variables.emplace(toVariable(literal)); });
@@ -487,10 +397,8 @@ public:
         }
     }
 
-    struct FilterResult { bool keep; bool exit = false; };
-
     template<typename T>
-    inline bool filter(std::function<FilterResult(T& node)> keep)
+    inline void filter(std::function<bool(T& node)> keep)
     {
         static_assert(std::is_same_v<T, Node> || std::is_same_v<T, LiteralID>);
         DEV_ASSURE((!std::is_same_v<T, Node> || hasChildren()), "Expected Children");
@@ -506,10 +414,8 @@ public:
                 continue;
             }
             
-            auto result = keep(*current);
-            if (result.exit) return true;
-
-            if (result.keep) break;
+            bool result = keep(*current);
+            if (result) break;
             current++;
         }
         m_child_begin = static_cast<void*>(&*current);
@@ -523,27 +429,48 @@ public:
                 continue;
             }
             
-            auto result = keep(*current);
-            if (result.exit) return true;
-
+            bool result = keep(*current);
             if (target != current) {
                 *target = *current;
             }
 
-            if (result.keep) target++;
+            if (result) target++;
             current++;
         }
 
         m_child_end = static_cast<void*>(&*target);
-        return false;
+    }
+
+    void simplify(const LiteralAssignment& assignments) {
+        if (hasChildren()) {
+            filter<Node>([&](Node& child) -> bool {
+                auto assigned = child.evaluate(assignments);
+                if (assigned.assigned) {
+                    if (isAND() && assigned.value) return false;
+                    if (isOR() && !assigned.value) return false;
+                }
+                return true;
+            });
+            for (auto& child: children()) child.simplify(assignments);
+        }
+
+        if (hasLiterals()) {
+            filter<LiteralID>([&](LiteralID& lit) -> bool {
+                return !assignments.getLiteralAssignment(lit).assigned;
+            });
+        }
     }
 
 private:
     NODE_TYPE m_type;
     void* m_child_begin;
     void* m_child_end;
-    DEV_ONLY(bool m_dev_sorted {false};)
 };
+
+std::ostream& operator<<(std::ostream& out, const Node& node) {
+    node.print(out);
+    return out;
+}
 
 
 // --------------------- Context -----------------------------------------
@@ -572,7 +499,7 @@ public:
         out << "ASSIGNMENTS:\n  ";
         assignments.print(out);
         if (root) {
-            out << "AST:\n";
+            out << "\nAST:\n";
             root->print(out, 1);
         }
         out << "\n\n";
@@ -622,13 +549,11 @@ protected:
 
         // Construct node with literals as children
         auto& node = m_ctx.nodeMemory.allocate(Node(NODE_TYPE::LITERAL_OR, literals));
-        // node.orderLiterals();
     }
 
     void finish() {
         ASSURE(m_current.empty(), "Unexpected end of input");
         m_ctx.root = &m_ctx.nodeMemory.allocate(Node(NODE_TYPE::AND, m_ctx.nodeMemory.all()));
-        // m_ctx.root->orderChildren();
     }
 
 private:
@@ -701,15 +626,27 @@ class Simplifier: public Phase {
 public:
     Assignment run() {
         Assignment result;
-        size_t assignmentCount;
+        bool assigned;
 
         do {
-            assignmentCount = m_ctx.assignments.getAssignmentCount();
-            DEV_PRINT("Simpliciation Round");
-            result = m_ctx.root->apply(m_ctx.assignments, true);
+            assigned = false;
+            
+            DEV_PRINT(" - Simplify " << m_ctx.assignments);
+            result = m_ctx.root->evaluate(m_ctx.assignments, [&](const Node& clause, LiteralID lit) {
+                assigned = true;
+                DEV_PRINT(clause << " => " << lit);
+                m_ctx.assignments.assignLiteral(lit, true);
+                return true;
+            });
         
         // Repeat simplification if a variable was assigned
-        } while(!result.assigned && assignmentCount != m_ctx.assignments.getAssignmentCount());
+        } while(!result.assigned && assigned);
+
+        if (!result.assigned) {
+            DEV_PRINT("Simplify Tree");
+            m_ctx.root->simplify(m_ctx.assignments);
+        }
+
         return result;
     }
 };
@@ -740,7 +677,7 @@ public:
                 for (VariableID variable: variables) { std::cerr << variable << " = " <<  m_ctx.assignments.getVariableAssignment(variable) << ", "; }
             )
         
-            auto assignment = m_ctx.root->evaluate(m_ctx.assignments, [](auto lit) { return false; });
+            auto assignment = m_ctx.root->evaluate(m_ctx.assignments, [](const Node& node, auto lit) { return false; });
             if (assignment.assigned && assignment.value) {
                 return assignment;
             }
@@ -756,6 +693,7 @@ public:
 
     struct TrailStep { LiteralID assignment; bool unit; };
     std::vector<TrailStep> trail;
+    uint64_t steps{0};
 
     void unwind() {
         do {
@@ -785,10 +723,16 @@ public:
         }
 
         for (VariableID variable: variables) {
+            steps++;
+            if (steps % 1'000 == 0) {
+                PRINT("\033cDPLL " << duration());
+                printTrail();
+            }
+
             // DEV_PRINT(variable << " = T")
             assign(toLiteral(variable, false), false);
             DEV_ONLY(printTrail());
-            auto assignment = m_ctx.root->evaluate(m_ctx.assignments, [&](LiteralID lit) {
+            auto assignment = m_ctx.root->evaluate(m_ctx.assignments, [&](const Node& node, LiteralID lit) {
                 // DEV_PRINT("Propagate Unit " << lit);
                 assign(lit, true);
                 return true;
@@ -809,7 +753,7 @@ public:
             // DEV_PRINT(variable << " = F")
             assign(toLiteral(variable, true), false);
             DEV_ONLY(printTrail());
-            assignment = m_ctx.root->evaluate(m_ctx.assignments, [&](LiteralID lit) {
+            assignment = m_ctx.root->evaluate(m_ctx.assignments, [&](const Node& node, LiteralID lit) {
                 // DEV_PRINT("Propagate Unit " << lit);
                 assign(lit, true);
                 return true;
