@@ -327,36 +327,44 @@ public:
 
 
     // Evaluates the predicate tree to the assignment
-    Assignment evaluate(const LiteralAssignment& literalAssignments, std::function<bool (const Node&, LiteralID)> propagateUnit = [](const Node&, LiteralID) { return false; }) const {
+    Assignment evaluate(const LiteralAssignment& literalAssignments, std::function<bool (const Node&, LiteralID)> propagateUnit = [](const Node&, LiteralID) { return false; }, const Node** conflictClause = nullptr) const {
         Assignment assignment = defaultAssignment();
 
-        uint32_t unassignedCount = 0;
-        LiteralID unitLiteral;
+        if (hasLiterals()) {
+            uint32_t unassignedCount = 0;
+            LiteralID unitLiteral;
 
-        for (const auto& literal: literals()) {
-            if (literal == NO_LITERAL) continue;
-            auto litAssignment = literalAssignments.getLiteralAssignment(literal);
-            updateAssignment(assignment, litAssignment);
-            if (shortCircuit(assignment)) return assignment;
+            for (const auto& literal: literals()) {
+                if (literal == NO_LITERAL) continue;
+                auto litAssignment = literalAssignments.getLiteralAssignment(literal);
+                updateAssignment(assignment, litAssignment);
+                if (shortCircuit(assignment)) return assignment;
 
-            if (!litAssignment.assigned) {
-                unassignedCount++;
-                if (unassignedCount == 1) unitLiteral = literal;
+                if (!litAssignment.assigned) {
+                    unassignedCount++;
+                    if (unassignedCount == 1) unitLiteral = literal;
+                }
+            }
+
+            if (isOR() && unassignedCount == 0) {
+                assignment.assigned = true;
+            } 
+
+            if (unassignedCount == 1) {
+                if (propagateUnit(*this, unitLiteral)) return { .assigned = true, .value = true };
+            }
+
+            if (conflictClause && assignment.assigned && !assignment.value) {
+                *conflictClause = this;
             }
         }
 
-        if (isOR() && unassignedCount == 0) {
-            assignment.assigned = true;
-        } 
-
-        if (unassignedCount == 1) {
-            if (propagateUnit(*this, unitLiteral)) return { .assigned = true, .value = true };
-        }
-
-        for (const auto& child: children()) {
-            if (child.isNoOp()) continue;
-            updateAssignment(assignment, child.evaluate(literalAssignments, propagateUnit));
-            if (shortCircuit(assignment)) return assignment;
+        if (hasChildren()) {
+            for (const auto& child: children()) {
+                if (child.isNoOp()) continue;
+                updateAssignment(assignment, child.evaluate(literalAssignments, propagateUnit, conflictClause));
+                if (shortCircuit(assignment)) return assignment;
+            }
         }
 
         return assignment;
@@ -715,12 +723,48 @@ public:
         std::cerr << "\n";
     }
 
+    Assignment assignStep(LiteralID lit) {
+        assign(lit, false);
+        DEV_ONLY(printTrail());
+
+        const Node* cc = nullptr;
+        bool assigned = false;
+        Assignment assignment;
+        do {
+            assigned = false;
+            assignment = m_ctx.root->evaluate(m_ctx.assignments, [&](const Node& node, LiteralID lit) {
+                assigned = true;
+                assign(lit, true);
+                return true;
+            }, &cc);
+        } while (!assignment.assigned && assigned);
+
+        if (assignment.assigned) {
+            if (assignment.value) {
+                DEV_PRINT("satisfied:")
+                DEV_ONLY(printTrail());
+                return { .assigned = true, .value = true };
+            } else {
+                DEV_PRINT("conflict " << *cc);
+                unwind();
+                return { .assigned = false, .value = false };
+            }
+        }
+
+        assignment = step();
+        if (assignment.assigned) {
+            DEV_ASSURE(assignment.value, "Unexpected unwind");
+            return assignment;
+        }
+
+        unwind();
+
+        return assignment;
+    }
+
     Assignment step() {
         auto variables = m_ctx.root->getUnassignedVariables(m_ctx.assignments);
-        if (variables.empty()) {
-            // DEV_PRINT("no open variables");
-            return { .assigned = true, .value = false };
-        }
+        DEV_ASSURE(!variables.empty(), "No unassigned variables left");
 
         for (VariableID variable: variables) {
             steps++;
@@ -729,47 +773,10 @@ public:
                 printTrail();
             }
 
-            // DEV_PRINT(variable << " = T")
-            assign(toLiteral(variable, false), false);
-            DEV_ONLY(printTrail());
-            auto assignment = m_ctx.root->evaluate(m_ctx.assignments, [&](const Node& node, LiteralID lit) {
-                // DEV_PRINT("Propagate Unit " << lit);
-                assign(lit, true);
-                return true;
-            });
-            if (assignment.assigned && assignment.value) {
-                DEV_PRINT("satisfied")
-                return { .assigned = true, .value = true };
-            }
-
-            assignment = step();
-            if (assignment.assigned && assignment.value) {
-                DEV_PRINT("satisfied")
-                return { .assigned = true, .value = true };
-            }
-
-            unwind();
-
-            // DEV_PRINT(variable << " = F")
-            assign(toLiteral(variable, true), false);
-            DEV_ONLY(printTrail());
-            assignment = m_ctx.root->evaluate(m_ctx.assignments, [&](const Node& node, LiteralID lit) {
-                // DEV_PRINT("Propagate Unit " << lit);
-                assign(lit, true);
-                return true;
-            });
-            if (assignment.assigned && assignment.value) {
-                DEV_PRINT("satisfied")
-                return { .assigned = true, .value = true };
-            }
-
-            assignment = step();
-            if (assignment.assigned && assignment.value) {
-                DEV_PRINT("satisfied")
-                return { .assigned = true, .value = true };
-            }
-    
-            unwind();
+            auto assignment = assignStep(toLiteral(variable, true));
+            if (assignment.assigned) return assignment;
+            assignment = assignStep(toLiteral(variable, false));
+            if (assignment.assigned) return assignment;
         }
 
         return { .assigned = false, .value = false };
