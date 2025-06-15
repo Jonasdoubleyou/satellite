@@ -109,14 +109,7 @@ void run() {
     }
 
     DEV_PRINT("-- Assignments")
-    for (uint32_t x: field.columns()) {
-        for (uint32_t y: field.rows()) {
-            uint8_t value = field.field(x, y);
-            if (value > 0) {
-                problem.add_clause(field.field_value(x, y, value));
-            }
-        }
-    }
+    field.assign_fields(problem);
 
     auto solution = problem.solve();
     if (solution != Result::SAT) {

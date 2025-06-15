@@ -1,6 +1,10 @@
 #include "common/utils.h"
 
-#define SOLUTION_FOUND(assignment) std::cerr << "\n\nSolution Found after " << duration() << ":\n"; assignment.print(std::cout); exit(0);
+#define SOLUTION_FOUND(assignment) \
+  std::cerr << "\n\nSolution Found after " << duration() << ":\n"; \
+  assignment.print(std::cout, true); \
+  exit(0);
+
 #define NO_SOLUTION(details) std::cerr << "\n\nNo Solution possible after " << duration() << ": " << details << "\n"; std::cout << "UNSAT\n"; exit(1);
 
 // --------------------- Memory Management -----------------------------------------
@@ -128,6 +132,12 @@ public:
         m_assignmentCount += 1;
     }
 
+    void unassignVariable(VariableID id) {
+        DEV_ASSURE(getVariableAssignment(id).assigned, "Unassigning not assigned " << id);
+        m_assignments.at((id - 1) * 2) = false;
+        m_assignmentCount -= 1;
+    }
+
     size_t getAssignmentCount() { return m_assignmentCount; }
 
     // Assigns the literal, i.e. assumes that a = True or NOT(a) = True
@@ -135,15 +145,16 @@ public:
         assignVariable(toVariable(literal), isNegated(literal) ? !value : value, overwrite);
     }
 
-    void print(std::ostream& out) const {
+    void print(std::ostream& out, bool asAssignment = false) const {
         for (VariableID i = 1; i <= getMaxVariable(); i++) {
             auto assignment = getVariableAssignment(i);
             if (assignment.assigned) {
                 out << (assignment.value ? "" : "-") << i << " ";
+                if (asAssignment) out << "0 ";
             }
         }
 
-        out << "\n";
+        out << "\n\n";
     }
 private:
     size_t m_assignmentCount = 0;
@@ -306,7 +317,7 @@ public:
         if (isAND()) {
             return { .assigned = true, .value = true };
         } else if(isOR()) {
-            return { .assigned = true, .value = false };
+            return { .assigned = false, .value = false };
         } else UNREACHABLE;
     }
 
@@ -323,14 +334,20 @@ public:
     void updateAssignment(Assignment& assignment, const Assignment& childAssignment) const {
         // If the child is not determined, this node cannot be too
         if (!childAssignment.assigned) {
-            assignment.assigned = false;
+            if (isAND()) assignment.assigned = false;
             return;
         }
 
         if (isAND()) {
-            if (!childAssignment.value) assignment.value = false;
+            if (!childAssignment.value) {
+                assignment.assigned = true;
+                assignment.value = false;
+            }
         } else if (isOR()) {
-            if (childAssignment.value) assignment.value = true;
+            if (childAssignment.value) {
+                assignment.assigned = true;
+                assignment.value = true;
+            }
         } else UNREACHABLE;
     }
 
@@ -393,17 +410,35 @@ public:
     }
 
     // Evaluates the predicate tree to the assignment
-    Assignment evaluate(const LiteralAssignment& literalAssignments) const {
+    Assignment evaluate(const LiteralAssignment& literalAssignments, std::function<bool (LiteralID)> propagateUnit) const {
         Assignment assignment = defaultAssignment();
+
+        uint32_t unassignedCount = 0;
+        LiteralID unitLiteral;
+
         for (const auto& literal: literals()) {
             if (literal == NO_LITERAL) continue;
-            updateAssignment(assignment, literalAssignments.getLiteralAssignment(literal));
+            auto litAssignment = literalAssignments.getLiteralAssignment(literal);
+            updateAssignment(assignment, litAssignment);
             if (shortCircuit(assignment)) return assignment;
+
+            if (!litAssignment.assigned) {
+                unassignedCount++;
+                if (unassignedCount == 1) unitLiteral = literal;
+            }
+        }
+
+        if (isOR() && unassignedCount == 0) {
+            assignment.assigned = true;
+        } 
+
+        if (unassignedCount == 1) {
+            if (propagateUnit(unitLiteral)) return { .assigned = true, .value = true };
         }
 
         for (const auto& child: children()) {
             if (child.isNoOp()) continue;
-            updateAssignment(assignment, child.evaluate(literalAssignments));
+            updateAssignment(assignment, child.evaluate(literalAssignments, propagateUnit));
             if (shortCircuit(assignment)) return assignment;
         }
 
@@ -433,6 +468,15 @@ public:
     std::set<VariableID> getVariables() const {
         std::set<VariableID> variables;
         visitLiterals([&](LiteralID literal) { variables.emplace(toVariable(literal)); });
+        return variables;
+    }
+
+    std::set<VariableID> getUnassignedVariables(const LiteralAssignment& literalAssignments) const {
+        std::set<VariableID> variables;
+        visitLiterals([&](LiteralID literal) { 
+            if (!literalAssignments.getLiteralAssignment(literal).assigned)
+                variables.emplace(toVariable(literal));
+        });
         return variables;
     }
 
@@ -559,12 +603,15 @@ protected:
             auto literal = m_current[0];
             
             auto existingAssignment = m_ctx.assignments.getLiteralAssignment(literal);
-            if (existingAssignment.assigned && !existingAssignment.value) {
-                NO_SOLUTION(literal << " conflict");
-                exit(1);
+            if (existingAssignment.assigned) {
+                if (!existingAssignment.value) {
+                    NO_SOLUTION(literal << " conflict");
+                    exit(1);
+                }
+            } else {
+                m_ctx.assignments.assignLiteral(literal, true);
             }
 
-            m_ctx.assignments.assignLiteral(literal, true);
             m_current.clear();
             return;
         }
@@ -590,13 +637,14 @@ private:
 };
 
 // Builds a Context from a DIMACS CNF file
-class FileParser: public ContextBuilder {
+template<typename Base>
+class FileParser: public Base {
 public:
-    using ContextBuilder::ContextBuilder;
+    using Base::Base;
 
     void run(std::istream& in) {
         parseChunk(in);
-        finish();
+        this->finish();
     }
 
 private:
@@ -631,7 +679,7 @@ private:
                     digits = 10 * digits + (cursor - '0');
                 } while (in.get(cursor) && cursor != ' ' && cursor != '\n');
 
-                addLiteral(toLiteral(digits, negate));
+                this->addLiteral(toLiteral(digits, negate));
                 if (digits == 0) break;
             } while(in.get(cursor));
         }
@@ -692,7 +740,7 @@ public:
                 for (VariableID variable: variables) { std::cerr << variable << " = " <<  m_ctx.assignments.getVariableAssignment(variable) << ", "; }
             )
         
-            auto assignment = m_ctx.root->evaluate(m_ctx.assignments);
+            auto assignment = m_ctx.root->evaluate(m_ctx.assignments, [](auto lit) { return false; });
             if (assignment.assigned && assignment.value) {
                 return assignment;
             }
@@ -700,6 +748,92 @@ public:
     }
 
 private:
+};
+
+class DPLL: public Phase {
+public:
+    DPLL(Context& ctx): Phase(ctx) {}
+
+    struct TrailStep { LiteralID assignment; bool unit; };
+    std::vector<TrailStep> trail;
+
+    void unwind() {
+        do {
+            TrailStep step = trail.back();
+            m_ctx.assignments.unassignVariable(toVariable(step.assignment));
+            trail.resize(trail.size() - 1);
+            if (!step.unit) break;
+            DEV_ASSURE(!trail.empty(), "unwinded past trail");
+        } while(true);
+    }
+
+    void assign(LiteralID lit, bool unit) {
+        trail.emplace_back(TrailStep{lit, unit});
+        m_ctx.assignments.assignLiteral(lit, true);
+    }
+
+    void printTrail() {
+        for (auto& step: trail) { std::cerr << step.assignment << (step.unit ? "u " : " "); }
+        std::cerr << "\n";
+    }
+
+    Assignment step() {
+        auto variables = m_ctx.root->getUnassignedVariables(m_ctx.assignments);
+        if (variables.empty()) {
+            // DEV_PRINT("no open variables");
+            return { .assigned = true, .value = false };
+        }
+
+        for (VariableID variable: variables) {
+            // DEV_PRINT(variable << " = T")
+            assign(toLiteral(variable, false), false);
+            DEV_ONLY(printTrail());
+            auto assignment = m_ctx.root->evaluate(m_ctx.assignments, [&](LiteralID lit) {
+                // DEV_PRINT("Propagate Unit " << lit);
+                assign(lit, true);
+                return true;
+            });
+            if (assignment.assigned && assignment.value) {
+                DEV_PRINT("satisfied")
+                return { .assigned = true, .value = true };
+            }
+
+            assignment = step();
+            if (assignment.assigned && assignment.value) {
+                DEV_PRINT("satisfied")
+                return { .assigned = true, .value = true };
+            }
+
+            unwind();
+
+            // DEV_PRINT(variable << " = F")
+            assign(toLiteral(variable, true), false);
+            DEV_ONLY(printTrail());
+            assignment = m_ctx.root->evaluate(m_ctx.assignments, [&](LiteralID lit) {
+                // DEV_PRINT("Propagate Unit " << lit);
+                assign(lit, true);
+                return true;
+            });
+            if (assignment.assigned && assignment.value) {
+                DEV_PRINT("satisfied")
+                return { .assigned = true, .value = true };
+            }
+
+            assignment = step();
+            if (assignment.assigned && assignment.value) {
+                DEV_PRINT("satisfied")
+                return { .assigned = true, .value = true };
+            }
+    
+            unwind();
+        }
+
+        return { .assigned = false, .value = false };
+    }
+
+    Assignment run() {
+        return step();
+    }
 };
 
 // --------------------- Solver -----------------------------------------
@@ -728,15 +862,19 @@ public:
 
     void run(std::istream& data) {
         runPhase("Build", [&]() {
-            FileParser(ctx).run(data);
+            FileParser<ContextBuilder>(ctx).run(data);
         });
 
         runPhaseResult("Simplify", [&]() {
             return Simplifier(ctx).run();
         });
 
-        runPhaseResult("BruteForce", [&]() {
-            return BruteForce(ctx).run();
+        // runPhaseResult("BruteForce", [&]() {
+        //     return BruteForce(ctx).run();
+        // });
+
+        runPhaseResult("DPLL", [&]() {
+            return DPLL(ctx).run();
         });
 
         NO_SOLUTION("None found");
@@ -744,6 +882,214 @@ public:
 
     Context ctx;
 };
+
+
+
+
+
+// ------------ Bipartite Graph Solver ---------------------
+class GraphSolver {
+public:
+    using ClauseID = uint32_t;
+    
+    static void run(std::istream& in) {
+        auto solver = FileParser<GraphSolver>();
+        solver.run(in);
+    }
+
+    void finish() {
+        print(std::cout);
+
+       ClauseID maxID = clauses.size();
+       for (ClauseID id = 1; id <= maxID; id++) {
+            if (clauses.find(id) != clauses.end())
+                visitClause(id);
+       }
+
+        VariableID varMaxID = variables.size(); // FIXME
+        for (VariableID varId = 1; varId <= varMaxID; varId++) {
+            if (variables.find(varId) != variables.end())
+                visitVariable(varId);
+        }
+
+        print(std::cout);
+    }
+
+    void visitClause(ClauseID id) {
+        DEV_PRINT("Visit Clause " << id);
+        auto& it = clause(id);
+
+        if (it.literals.empty()) {
+            NO_SOLUTION("Empty Clause");
+        }
+
+        // Unit Propagation
+        if (it.literals.size() == 1) {
+            LiteralID unit = *it.literals.begin();
+            DEV_PRINT("Unit Propagation " << unit);
+            assignVariable(toVariable(unit), !isNegated(unit));
+        }
+    }
+
+    void removeFromVariable(LiteralID lit, ClauseID id) {
+        DEV_PRINT("Remove from Variable " << lit << " " << id);
+        auto& var = variable(toVariable(lit));
+        if (isNegated(lit)) var.negativeClauses.erase(id); else var.positiveClauses.erase(id);
+    }
+
+    void removeFromClause(ClauseID id, LiteralID lit) {
+        DEV_PRINT("Remove from Clause " << id << " " << lit);
+        auto& it = clause(id).literals;
+        it.erase(lit);
+    }
+
+    void removeClause(ClauseID id) {
+        DEV_PRINT("Remove Clause " << id);
+
+        for (const LiteralID lit: clause(id).literals) {
+            removeFromVariable(lit, id);
+            visitVariable(toVariable(lit));
+        }
+
+        clauses.erase(id);
+        if (clauses.empty()) {
+            SOLUTION_FOUND((*this));
+        }
+    }
+
+    void assignVariable(VariableID id, bool value) {
+        DEV_PRINT("Assign Variable " << id << " = " << (value ? "T" : "F"));
+        auto& var = variable(id);
+        if (var.assigned) {
+            if (value != var.value) NO_SOLUTION("Conflicting assignment for " << id);
+            return;
+        }
+
+        var.assigned = true;
+        var.value = value;
+
+        for (const auto& positive: var.positiveClauses) {
+            removeFromClause(positive, id);
+            if (value) removeClause(positive);
+            else visitClause(positive);
+        }
+
+        for (const auto& negative: var.negativeClauses) {
+            removeFromClause(negative, toLiteral(id, true));
+            if (!value) removeClause(negative);
+            else visitClause(negative);
+        }
+    }
+
+    void visitVariable(VariableID id) {
+        DEV_PRINT("Visit Variable " << id);
+        auto& var = variable(id);
+        if (var.assigned) return;
+
+        // Pure Literal elimination
+        if (var.negativeClauses.empty()) {
+            DEV_PRINT("Pure Positive Variable " << id);
+            assignVariable(id, true);
+            return;
+        }
+
+        if (var.positiveClauses.empty()) {
+            DEV_PRINT("Pure Negative Variable " << id);
+            assignVariable(id, false);
+            return;
+        }
+    }
+
+    void print(std::ostream& out, bool asAssignment = false) {
+        if (asAssignment) {
+            for (const auto& [variableID, variable]: variables) {
+                if (variable.assigned) {
+                    out << (variable.value ? "" : "-") << variableID << " 0 ";
+                }
+            }
+            return;
+        }
+
+        out << "CLAUSES:\n";
+        for (const auto& [clauseID, clause]: clauses) {
+            out << clauseID << " -> (";
+            for (const auto& literalID: clause.literals) {
+                out << literalID << ", ";
+            }
+            out << ")\n";
+        }
+
+        out << "VARIABLES:\n";
+        for (const auto& [variableID, variable]: variables) {
+            out << variableID;
+            if (variable.assigned) {
+                out << " = " << (variable.value ? "T" : "F");
+            }
+            out << " -> (";
+            for (const auto& clauseID: variable.positiveClauses) {
+                out << "+" << clauseID << ", ";
+            }
+            for (const auto& clauseID: variable.negativeClauses) {
+                out << "-" << clauseID << ", ";
+            }
+            out << ")\n";
+        }
+    }
+
+    void addLiteral(LiteralID literal) {
+        if (literal == 0 && currentLiterals.size() > 0) {
+            ClauseID clauseID = clauses.size() + 1;
+            auto clause_it = clauses.try_emplace(clauseID);
+            auto& clause = clause_it.first->second;
+            clause.literals = currentLiterals;
+            currentLiterals.clear();
+
+            for (LiteralID lit: clause.literals) {
+                auto var_it = variables.try_emplace(toVariable(lit));
+                auto& var = var_it.first->second;
+                if (isNegated(lit))
+                    var.negativeClauses.insert(clauseID);
+                else
+                    var.positiveClauses.insert(clauseID);
+            }
+        } else {
+            currentLiterals.insert(literal);
+        }
+    }
+
+private:
+    class Clause {
+    public:
+        std::set<LiteralID> literals;
+    };
+
+    class Variable {
+    public:
+        std::set<ClauseID> positiveClauses;
+        std::set<ClauseID> negativeClauses;
+
+        bool assigned = false;
+        bool value = false;
+    };
+
+    Clause& clause(ClauseID id) {
+        auto it = clauses.find(id);
+        DEV_ASSURE(it != clauses.end(), "Lost clause " << id)
+        return it->second;
+    }
+
+    Variable& variable(VariableID id) {
+        auto it = variables.find(id);
+        DEV_ASSURE(it != variables.end(), "Lost variable " << id)
+        return it->second;
+    }
+
+    std::map<ClauseID, Clause> clauses;
+    std::map<VariableID, Variable> variables;
+
+    std::set<LiteralID> currentLiterals;
+};
+
 
 
 
@@ -762,12 +1108,14 @@ int main(int argc, char* argv[]) {
 
         auto solver = Solver();
         solver.run(fs);
+        // GraphSolver::run(fs);
     } else {
         // Exclude file opening time from measurements to make them more stable
         restartTime();
 
         auto solver = Solver();
         solver.run(std::cin); 
+        // GraphSolver::run(std::cin);
     }
 
     return 0;

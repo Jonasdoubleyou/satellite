@@ -67,6 +67,17 @@ public:
         }
     }
 
+    template<typename T>
+    void assign_fields(T& problem) {
+        for (uint32_t row: rows()) {
+            for (uint32_t col: columns()) {
+                if (field(row, col) > 0) {
+                    problem.add_clause(field_value(row, col, field(row, col)));
+                }
+            }
+        }
+    }
+
 private:
     std::vector<uint8_t> fields;
     uint32_t value_count = 0;

@@ -7,6 +7,7 @@
 #include <fstream>
 #include <functional>
 #include <set>
+#include <map>
 #include <unordered_set>
 
 #include "./config.h"

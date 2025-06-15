@@ -1,4 +1,5 @@
 #include "../common/field.h"
+#include "../common/generate.h"
 
 auto field = Field2D();
 auto regions = Field2D();
@@ -9,18 +10,20 @@ void parse(std::istream &in)
     PRINT("Suguru " << size << " x " << size);
     field.init(size, size);
     field.read(in);
+    PRINT("Field: ")
+    field.print();
 
     regions.init(size, size);
     regions.read(in);
+    PRINT("Regions: ")
+    regions.print();
 }
 
 void run() {
-    PRINT("Field: ")
-    field.print();
-    PRINT("Regions: ")
-    regions.print();
+    PRINT("-- Known Assignments:")
+    field.assign_fields(problem);
 
-
+    // TODO
 }
 
 int main(int argc, char* argv[]) {
