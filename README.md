@@ -1,5 +1,10 @@
 # SATellite
 
+<sub>There are probably many other people that named their solver SATellite before me ... If you look for "that solver" it is probably not this one</sub>
+
+ATTENTION: While the solver implements CDCL which is known to be correct,
+ this implementation is a toy project - there is no guarantee that the provided implementation is correct.
+
 A naive solver for the boolean satisfiability problem (SAT) as well as various generators for SAT problems.
 Also embeds [Kissat](https://github.com/arminbiere/kissat/) for solving the problems using a not-so-naive solver.
 
