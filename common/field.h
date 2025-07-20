@@ -78,6 +78,10 @@ public:
         }
     }
 
+    size_t variable_count() {
+        return field_size * value_count;
+    }
+
 private:
     std::vector<uint8_t> fields;
     uint32_t value_count = 0;

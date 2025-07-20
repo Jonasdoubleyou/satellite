@@ -21,6 +21,8 @@ void run() {
     // Minimal Clauses according to https://sat.inesc-id.pt/~ines/publications/aimath06.pdf
     // Extended Clauses commented out
 
+    problem.add_header(field.variable_count(), 0);
+
     DEV_PRINT("-- Cells")
     for (uint32_t x: field.columns()) {
         for (uint32_t y: field.rows()) {
